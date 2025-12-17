@@ -1,0 +1,141 @@
+# SBCL Macro Research - Clean .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Research Output (keep samples only)
+output/
+results/
+analysis/
+**/test_case_*.lisp
+crash_dumps/
+binary_diffs/
+
+# SBCL
+*.fasl
+*.fas
+*.lib
+sbcl-source/
+
+# Large generated directories  
+isolation_output/bypass_test_*.lisp
+!isolation_output/bypass_test_000006.lisp  # Keep successful example
+
+# Logs and temporary
+*.log
+*.tmp
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+output/
+results/
+*.log
+*.tmp
+*.core
+core.*
+*.dmp
+
+# Compiled LISP files
+*.fas
+*.lib
+*.x86f
+*.sse2f
+*.lx32fsl
+*.lx64fsl
+*.dfsl
+
+# Crash dumps and analysis files
+crash_dumps/
+*.crash
+*.trace
+
+# Fuzzing outputs
+test_case_*.lisp
+fuzz_output_*.txt
+
+# Binary analysis files
+*.idb
+*.i64
+*.bndb
+*.ghidra/
