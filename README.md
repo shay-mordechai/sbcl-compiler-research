@@ -1,5 +1,10 @@
 # SBCL Dynamic Binding Vulnerability Research
 
+## 🛡️ Responsible Disclosure Status
+- **MITRE CVE:** Pending (Submitted 3 vulnerability reports)
+- **CERT-IL Reference:** #11265
+- **Status:** Coordinated Disclosure in Progress
+
 ## 🚨 Critical Findings
 This repository documents the discovery and analysis of **3 critical 0-day vulnerabilities** in the SBCL (Steel Bank Common Lisp) compiler:
 
