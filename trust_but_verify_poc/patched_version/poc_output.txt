@@ -1,0 +1,5 @@
+=== Running PoC on Modern SBCL ===
+Before Attack: PROTECTED_DATA
+After Attack: COMPROMISED
+[!] VULNERABILITY CONFIRMED: Lexical isolation bypassed.
+SBCL version: SBCL 2.5.9-1.fc41

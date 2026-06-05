@@ -1,0 +1,452 @@
+commit c5411bf58184280dadf9578f4c420f1ec9d78d5e
+Author: Douglas Katzman <dougk@google.com>
+Date:   Tue Mar 24 15:37:14 2026 -0400
+
+    Modernize another error message
+---
+ src/compiler/ir1tran.lisp | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/compiler/ir1tran.lisp b/src/compiler/ir1tran.lisp
+index 8420782e4..527c37e8c 100644
+--- a/src/compiler/ir1tran.lisp
++++ b/src/compiler/ir1tran.lisp
+@@ -238,7 +238,7 @@
+ ;;; If NAME already has a valid entry in (FREE-FUNS *IR1-NAMESPACE*), then return
+ ;;; the value. Otherwise, make a new GLOBAL-VAR using information from
+ ;;; the global environment and enter it in FREE-FUNS. If NAME
+-;;; names a macro or special form, then we error out using the
++;;; names a macro or special operator, then we error out using the
+ ;;; supplied context which indicates what we were trying to do that
+ ;;; demanded a function.
+ (declaim (ftype (sfunction (t string &optional boolean) t) find-free-fun))
+@@ -250,7 +250,9 @@
+            (if (and (eq kind :macro)
+                     (not error-on-macro))
+                kind
+-               (compiler-error "The ~(~S~) name ~S was found ~A." kind name context)))
++               (compiler-error "The ~A ~S was found ~A."
++                               (if (eq kind :macro) "macro" "special operator")
++                               name context)))
+           ((:function nil)
+            (check-fun-name name)
+            (let ((expansion (fun-name-inline-expansion name))
+
+commit 55354f0e341a609bf7c0ee6efa1413712e06ff3c
+Author: Stas Boukarev <stassats@gmail.com>
+Date:   Thu Feb 12 03:30:22 2026 +0300
+
+    Small compiler efficiency changes
+---
+ src/compiler/ir1tran.lisp | 1 -
+ src/compiler/macros.lisp  | 1 -
+ 2 files changed, 2 deletions(-)
+
+diff --git a/src/compiler/ir1tran.lisp b/src/compiler/ir1tran.lisp
+index e86531b1a..8420782e4 100644
+--- a/src/compiler/ir1tran.lisp
++++ b/src/compiler/ir1tran.lisp
+@@ -655,7 +655,6 @@
+ ;;; FUNCTIONAL is returned.
+ (defun maybe-reanalyze-functional (functional)
+   (aver (not (functional-kind-eq functional deleted))) ; bug 148
+-  (aver-live-component *current-component*)
+   ;; When FUNCTIONAL is of a type for which reanalysis isn't a trivial
+   ;; no-op
+   (when (and (typep functional '(or optional-dispatch clambda))
+diff --git a/src/compiler/macros.lisp b/src/compiler/macros.lisp
+index 621009b38..9098cdee2 100644
+--- a/src/compiler/macros.lisp
++++ b/src/compiler/macros.lisp
+@@ -655,7 +655,6 @@
+            (*inline-expansions* (if (basic-combination-p ,node)
+                                     (basic-combination-inline-expansions ,node)
+                                     *inline-expansions*)))
+-       (aver-live-component *current-component*)
+        ,@forms)))
+ 
+ ;;; *SOURCE-PATHS* is a hashtable from source code forms to the path
+
+commit 125d15e32ce36fbdd67d8097093f723601c1886f
+Author: Stas Boukarev <stassats@gmail.com>
+Date:   Sat Jan 31 18:16:25 2026 +0300
+
+    Fix hide-packages.test.h
+---
+ src/compiler/macros.lisp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/compiler/macros.lisp b/src/compiler/macros.lisp
+index 3a9894cf8..621009b38 100644
+--- a/src/compiler/macros.lisp
++++ b/src/compiler/macros.lisp
+@@ -475,7 +475,7 @@
+                                                 collect bind)))
+                     ,@more-decls ,@forms))
+                 ,@(when (consp what)
+-                    `((setf (,(package-symbolicate "SB-C" "FUN-INFO-" (second what))
++                    `((setf (,(package-symbolicate #.(find-package "SB-C") "FUN-INFO-" (second what))
+                              (fun-info-or-lose ',(first what)))
+                             #',name)))))))))
+ 
+@@ -490,7 +490,7 @@
+            (,lambda-list ,node ,@vars)
+          ,@body)
+        ,@(loop for name in (cdr names)
+-               collect `(setf (,(package-symbolicate "SB-C" "FUN-INFO-" kind)
++               collect `(setf (,(package-symbolicate #.(find-package "SB-C") "FUN-INFO-" kind)
+                                (fun-info-or-lose ',name))
+                               #',optimizer-name)))))
+ 
+
+commit 08ef974aa4f404d661d1055c2af45fb55e80c1c3
+Author: Stas Boukarev <stassats@gmail.com>
+Date:   Sat Jan 31 17:35:40 2026 +0300
+
+    Don't constant fold large left shifts
+    
+    Reported by Eric Marsden
+---
+ src/compiler/macros.lisp | 48 ++++++++++++++++++++++++------------------------
+ 1 file changed, 24 insertions(+), 24 deletions(-)
+
+diff --git a/src/compiler/macros.lisp b/src/compiler/macros.lisp
+index 2c6fc2535..3a9894cf8 100644
+--- a/src/compiler/macros.lisp
++++ b/src/compiler/macros.lisp
+@@ -385,6 +385,22 @@
+                                      #',transform-name ,important))
+                    names)))))
+ 
++
++(defun make-optimizer-name (name)
++  (flet ((function-name (name)
++           (etypecase name
++             (symbol name)
++             ((cons (eql setf) (cons symbol null))
++              (symbolicate (car name) "-" (cadr name))))))
++    (if (symbolp name)
++        name
++        (symbolicate (function-name (first name))
++                     "-"
++                     (if (consp (second name))
++                         (caadr name)
++                         (second name))
++                     "-OPTIMIZER"))))
++
+ ;;; Create a function which parses combination args according to WHAT
+ ;;; and LAMBDA-LIST, where WHAT is either a function name or a list
+ ;;; (FUN-NAME KIND) and does some KIND of optimization.
+@@ -410,19 +426,7 @@
+                               &optional (node (gensym))
+                               &rest vars)
+                         &body body)
+-  (let ((name (flet ((function-name (name)
+-                       (etypecase name
+-                         (symbol name)
+-                         ((cons (eql setf) (cons symbol null))
+-                          (symbolicate (car name) "-" (cadr name))))))
+-                (if (symbolp what)
+-                    what
+-                    (symbolicate (function-name (first what))
+-                                 "-"
+-                                 (if (consp (second what))
+-                                     (caadr what)
+-                                     (second what))
+-                                 "-OPTIMIZER")))))
++  (let ((name (make-optimizer-name what)))
+     (cond ((typep what '(cons (eql vop-optimize)))
+            `(progn
+               (defun ,name (,lambda-list)
+@@ -435,7 +439,7 @@
+                                                `#',name)))))
+           ((typep what '(cons t (cons (eql fold-p))))
+            `(progn
+-              (defun ,name (,lambda-list)
++              (defun ,name ,lambda-list
+                 ,@body)
+               (setf (,(let ((*package* (sb-xc:symbol-package 'fun-info)))
+                         (symbolicate "FUN-INFO-" (second what)))
+@@ -471,8 +475,7 @@
+                                                 collect bind)))
+                     ,@more-decls ,@forms))
+                 ,@(when (consp what)
+-                    `((setf (,(let ((*package* (sb-xc:symbol-package 'fun-info)))
+-                                (symbolicate "FUN-INFO-" (second what)))
++                    `((setf (,(package-symbolicate "SB-C" "FUN-INFO-" (second what))
+                              (fun-info-or-lose ',(first what)))
+                             #',name)))))))))
+ 
+@@ -480,17 +483,14 @@
+                                      &optional (node (gensym))
+                                      &rest vars)
+                          &body body)
+-  (let ((optimizer-name (symbolicate (car names)
+-                                     "-"
+-                                     kind
+-                                     "-OPTIMIZER")))
++  (let* ((name (list (car names) kind))
++         (optimizer-name (make-optimizer-name name)))
+     `(progn
+-       (defoptimizer ,optimizer-name
++       (defoptimizer ,name
+            (,lambda-list ,node ,@vars)
+          ,@body)
+-       ,@(loop for name in names
+-               collect `(setf (,(let ((*package* (sb-xc:symbol-package 'fun-info)))
+-                                  (symbolicate "FUN-INFO-" kind))
++       ,@(loop for name in (cdr names)
++               collect `(setf (,(package-symbolicate "SB-C" "FUN-INFO-" kind)
+                                (fun-info-or-lose ',name))
+                               #',optimizer-name)))))
+ 
+
+commit 45265d0aa4624441dfc7ba107c8db4d5e3b79686
+Author: Stas Boukarev <stassats@gmail.com>
+Date:   Thu Jan 29 00:57:23 2026 +0300
+
+    Allow not/inline to be used on macros
+    
+    To disable/enable compiler macros. As per the standard.
+    
+    Fixes lp#1490345
+---
+ src/compiler/ir1tran.lisp | 56 ++++++++++++++++++++++++++++-------------------
+ 1 file changed, 34 insertions(+), 22 deletions(-)
+
+diff --git a/src/compiler/ir1tran.lisp b/src/compiler/ir1tran.lisp
+index 7b8f92f11..e86531b1a 100644
+--- a/src/compiler/ir1tran.lisp
++++ b/src/compiler/ir1tran.lisp
+@@ -153,11 +153,10 @@
+                 (return-from fun-lexically-notinline-p
+                   (eq (defined-fun-inlinep fun) 'notinline)))
+               (loop for data in (lexenv-user-data env)
+-                    when (and (eq (car data) 'no-compiler-macro)
+-                              (eq (cdr data) name))
++                    when (and (eq (first data) 'compiler-macro)
++                              (eq (second data) name))
+                     do
+-                    (return-from fun-lexically-notinline-p
+-                      t)))))))
++                    (return-from fun-lexically-notinline-p (eq (third data) 'notinline))))))))
+     ;; If ANSWER is NIL, go for the global value
+     (eq (or answer (info :function :inlinep name)) 'notinline)))
+ 
+@@ -242,14 +241,16 @@
+ ;;; names a macro or special form, then we error out using the
+ ;;; supplied context which indicates what we were trying to do that
+ ;;; demanded a function.
+-(declaim (ftype (sfunction (t string) global-var) find-free-fun))
+-(defun find-free-fun (name context &aux (free-funs (free-funs *ir1-namespace*)))
++(declaim (ftype (sfunction (t string &optional boolean) t) find-free-fun))
++(defun find-free-fun (name context &optional (error-on-macro t) &aux (free-funs (free-funs *ir1-namespace*)))
+   (or (gethash name free-funs)
+       (let ((kind (info :function :kind name)))
+         (ecase kind
+           ((:macro :special-form)
+-           (compiler-error "The ~(~S~) name ~S was found ~A."
+-                           kind name context))
++           (if (and (eq kind :macro)
++                    (not error-on-macro))
++               kind
++               (compiler-error "The ~(~S~) name ~S was found ~A." kind name context)))
+           ((:function nil)
+            (check-fun-name name)
+            (let ((expansion (fun-name-inline-expansion name))
+@@ -272,16 +273,18 @@
+ 
+ ;;; Return the LEAF structure for the lexically apparent function
+ ;;; definition of NAME.
+-(declaim (ftype (sfunction (t string) leaf) find-lexically-apparent-fun))
+-(defun find-lexically-apparent-fun (name context)
++(declaim (ftype (sfunction (t string &optional t) (or leaf (eql :macro))) find-lexically-apparent-fun))
++(defun find-lexically-apparent-fun (name context &optional (error-on-macro t))
+   (let ((var (lexenv-find name funs :test #'equal)))
+-    (cond (var
+-           (unless (leaf-p var)
+-             (aver (and (consp var) (eq (car var) 'macro)))
+-             (compiler-error "found macro name ~S ~A" name context))
++    (cond ((leaf-p var)
+            var)
++          (var
++           (aver (and (consp var) (eq (car var) 'macro)))
++           (if error-on-macro
++               (compiler-error "found macro name ~S ~A" name context)
++               :macro))
+           (t
+-           (find-free-fun name context)))))
++           (find-free-fun name context error-on-macro)))))
+ 
+ (declaim (end-block))
+ 
+@@ -1470,7 +1473,8 @@
+ ;;; defining, set its INLINEP. If a global function, add a new FENV entry.
+ (defun process-inline-decl (spec res fvars)
+   (let ((sense (first spec))
+-        (new-fenv ()))
++        (new-fenv ())
++        user-data)
+     (dolist (name (rest spec))
+       (let ((fvar (find name fvars
+                         :key (lambda (x)
+@@ -1480,8 +1484,16 @@
+         (if fvar
+             (setf (functional-inlinep fvar) sense)
+             (let ((found (find-lexically-apparent-fun
+-                          name "in an inline or notinline declaration")))
++                          name "in an inline or notinline declaration"
++                          nil)))
+               (etypecase found
++                ((eql :macro)
++                 (unless user-data
++                   (setf user-data (lexenv-user-data res)))
++                 (case sense
++                   ((inline notinline)
++                    (setf user-data
++                          (list* (list 'compiler-macro name sense) user-data)))))
+                 (functional
+                  (when (policy *lexenv* (>= speed inhibit-warnings))
+                    (compiler-notify "ignoring ~A declaration not at ~
+@@ -1489,11 +1501,12 @@
+                                     sense name)))
+                 (global-var
+                  (let ((type
+-                        (cdr (assoc found (lexenv-type-restrictions res)))))
++                         (cdr (assoc found (lexenv-type-restrictions res)))))
+                    (push (cons name (make-new-inlinep found sense type))
+                          new-fenv))))))))
+-    (if new-fenv
+-        (make-lexenv :default res :funs new-fenv)
++    (if (or new-fenv user-data)
++        (make-lexenv :default res :funs new-fenv
++                     :user-data user-data)
+         res)))
+ 
+ ;;; like FIND-IN-BINDINGS, but looks for #'FOO in the FVARS
+@@ -1657,7 +1670,7 @@
+        (no-compiler-macro
+         (make-lexenv :default res
+                      :user-data (list*
+-                                 (cons 'no-compiler-macro (second spec))
++                                 (list 'compiler-macro (second spec) 'notinline)
+                                  (lexenv-user-data res))))
+        (optimize
+         (multiple-value-bind (new-policy specified-qualities)
+@@ -1936,7 +1949,6 @@
+ (defun process-inline-proclamation (kind funs)
+   (declare (type (and inlinep (not null)) kind))
+   (dolist (name funs)
+-    (proclaim-as-fun-name name)
+     (let* ((free-funs (free-funs *ir1-namespace*))
+            (var (gethash name free-funs)))
+       (etypecase var
+
+commit 673a3d8ab8b7d158fba743ebffdd8c79214f27b0
+Author: Stas Boukarev <stassats@gmail.com>
+Date:   Wed Jan 28 07:25:45 2026 +0300
+
+    Fix scale-float rounding for subnormals
+    
+    Shifting right discards some set bits. Rely on the FPU multiplication
+    instead.
+---
+ src/compiler/macros.lisp | 62 ------------------------------------------------
+ 1 file changed, 62 deletions(-)
+
+diff --git a/src/compiler/macros.lisp b/src/compiler/macros.lisp
+index 7d0eb5a6c..2c6fc2535 100644
+--- a/src/compiler/macros.lisp
++++ b/src/compiler/macros.lisp
+@@ -1022,65 +1022,3 @@ specify bindings for printer control variables.")
+         (nreverse (mapcar #'car *compiler-print-variable-alist*))
+         (nreverse (mapcar #'cdr *compiler-print-variable-alist*))
+       ,@forms)))
+-
+-(defmacro make-defs (vars &body body)
+-  (labels ((subst-if-with (test tree)
+-             (labels ((s (subtree)
+-                        (multiple-value-bind (new replace)
+-                            (funcall test subtree)
+-                          (cond (replace new)
+-                                ((comma-p subtree)
+-                                 (let ((new (s (comma-expr subtree))))
+-                                   (if (eq subtree new)
+-                                       subtree
+-                                       (unquote new (comma-kind subtree)))))
+-                                ((atom subtree) subtree)
+-                                (t (let ((car (s (car subtree)))
+-                                         (cdr (s (cdr subtree))))
+-                                     (if (and (eq car (car subtree))
+-                                              (eq cdr (cdr subtree)))
+-                                         subtree
+-                                         (cond ((and (typep car '(cons symbol))
+-                                                     (string= (car car) "$WHEN"))
+-                                                (if (eval (second car))
+-                                                    (append (cddr car) cdr)
+-                                                    cdr))
+-                                               ((and (typep car '(cons symbol))
+-                                                     (string= (car car) "$UNLESS"))
+-                                                (if (eval (second car))
+-                                                    cdr
+-                                                    (append (cddr car) cdr)))
+-                                               ((and (typep car '(cons symbol))
+-                                                     (string= (car car) "$IF"))
+-                                                (cons
+-                                                 (if (eval (second car))
+-                                                     (third car)
+-                                                     (fourth car))
+-                                                 cdr))
+-                                               (t
+-                                                (cons car cdr))))))))))
+-               (s tree)))
+-           (test (pattern with)
+-             (lambda (x)
+-               (when (symbolp x)
+-                 (let* ((str (string x))
+-                        (start (search pattern str)))
+-                   (when start
+-                     (if (equal str pattern)
+-                         (values with t)
+-                         (values (symbolicate (subseq str 0 start)
+-                                              with
+-                                              (subseq str (+ start (length pattern))))
+-                                 t)))))))
+-           (gen (vars body)
+-             (if vars
+-                 (loop for with in (cdar vars)
+-                       append
+-                       (gen (cdr vars)
+-                            (let ((body body))
+-                              (loop for v in (ensure-list (caar vars))
+-                                    for w in (ensure-list with)
+-                                    do (setf body (subst-if-with (test (string v) w) body)))
+-                              body)))
+-                 body)))
+-    `(progn ,@(gen vars body))))
+
+commit dafb3a0201acac2ec7eb6d3d1664f902d2b1f7a4
+Author: Stas Boukarev <stassats@gmail.com>
+Date:   Tue Jan 13 23:08:19 2026 +0300
+
+    (floor (floor a 10) 20) => (floor a 200)
+---
+ src/compiler/macros.lisp | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/compiler/macros.lisp b/src/compiler/macros.lisp
+index c99093c82..7d0eb5a6c 100644
+--- a/src/compiler/macros.lisp
++++ b/src/compiler/macros.lisp
+@@ -1029,6 +1029,11 @@ specify bindings for printer control variables.")
+                         (multiple-value-bind (new replace)
+                             (funcall test subtree)
+                           (cond (replace new)
++                                ((comma-p subtree)
++                                 (let ((new (s (comma-expr subtree))))
++                                   (if (eq subtree new)
++                                       subtree
++                                       (unquote new (comma-kind subtree)))))
+                                 ((atom subtree) subtree)
+                                 (t (let ((car (s (car subtree)))
+                                          (cdr (s (cdr subtree))))

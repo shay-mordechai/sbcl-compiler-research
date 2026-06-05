@@ -1,0 +1,24 @@
+commit dfbdd309dbede278c76561278241cc3dc3991b32
+Author: Stas Boukarev <stassats@gmail.com>
+Date:   Wed Feb 25 04:18:16 2026 +0300
+
+    x86-64, emit-instrument-alloc: use the right immediate encoding
+    
+    Reported and diagnosed by Andreas Franke.
+
+diff --git a/src/compiler/x86-64/alloc.lisp b/src/compiler/x86-64/alloc.lisp
+index 11c45d9ab..30eb4064a 100644
+--- a/src/compiler/x86-64/alloc.lisp
++++ b/src/compiler/x86-64/alloc.lisp
+@@ -153,7 +153,10 @@
+             (t
+              (let ((index (+ (- (integer-length size) minlog2) vector-data-offset n-bins-small)))
+                (inst add :qword (object-slot-ea data (+ index n-bins-large) other-pointer-lowtag)
+-                     size)
++                     (if use-size-temp
++                         ;; Loaded above
++                         temp
++                         size))
+                (inst inc :qword (object-slot-ea data index other-pointer-lowtag)))))
+       (inst pop data)))) ; restore the primive thread
+ 

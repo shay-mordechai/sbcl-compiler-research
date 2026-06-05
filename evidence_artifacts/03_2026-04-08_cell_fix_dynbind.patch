@@ -1,0 +1,64 @@
+commit 5249a30f980f1edb05741ad939b6399e8a54e22a
+Author: Stas Boukarev <stassats@gmail.com>
+Date:   Wed Apr 8 07:26:26 2026 +0300
+
+    x86-64: fix dynbind for -sb-thread
+
+diff --git a/src/compiler/x86-64/cell.lisp b/src/compiler/x86-64/cell.lisp
+index cb6e84255..982b24f04 100644
+--- a/src/compiler/x86-64/cell.lisp
++++ b/src/compiler/x86-64/cell.lisp
+@@ -190,7 +190,9 @@
+   (define-vop (dynbind)
+     (:args (val :scs (any-reg descriptor-reg))
+            (symbol :scs (descriptor-reg)))
++    (:arg-refs value-ref)
+     (:temporary (:sc unsigned-reg) temp bsp)
++    (:vop-var vop)
+     (:generator 5
+       (load-binding-stack-pointer bsp)
+       (loadw temp symbol symbol-value-slot other-pointer-lowtag)
+@@ -198,17 +200,24 @@
+       (store-binding-stack-pointer bsp)
+       (storew temp bsp (- binding-value-slot binding-size))
+       (storew symbol bsp (- binding-symbol-slot binding-size))
+-      (emit-gengc-barrier symbol nil temp)
+-      (storew val symbol symbol-value-slot other-pointer-lowtag)))
++      (pseudo-atomic (:elide-if #+immobile-space
++                                (not (symbol-set-barrier-p symbol value-ref))
++                                #-immobile-space t)
++        (emit-symbol-write-barrier vop symbol temp value-ref)
++        (storew val symbol symbol-value-slot other-pointer-lowtag))))
+ 
+   (define-vop (unbind)
+     (:temporary (:sc unsigned-reg) symbol value bsp)
++    (:vop-var vop)
+     (:generator 0
+       (load-binding-stack-pointer bsp)
+       (loadw symbol bsp (- binding-symbol-slot binding-size))
+-      (emit-gengc-barrier symbol nil value) ; VALUE is the card-mark temp
+-      (loadw value bsp (- binding-value-slot binding-size))
+-      (storew value symbol symbol-value-slot other-pointer-lowtag)
++      (pseudo-atomic (:elide-if #+immobile-space
++                                (not (symbol-set-barrier-p symbol nil))
++                                #-immobile-space t)
++        (emit-symbol-write-barrier vop symbol value nil)
++        (loadw value bsp (- binding-value-slot binding-size))
++        (storew value symbol symbol-value-slot other-pointer-lowtag))
+       (storew 0 bsp (- binding-symbol-slot binding-size))
+       (storew 0 bsp (- binding-value-slot binding-size))
+       (inst sub bsp (* binding-size n-word-bytes))
+diff --git a/tests/aliencall.pure.lisp b/tests/aliencall.pure.lisp
+index 128a31472..68d651671 100644
+--- a/tests/aliencall.pure.lisp
++++ b/tests/aliencall.pure.lisp
+@@ -3,7 +3,8 @@
+ ;;; ref in SB-ALIEN::*STRUCT-TYPE-CACHE which will get GCed.
+ (define-alien-type nil (struct myalien))
+ 
+-(with-test (:name :no-alien-sap-call)
++(with-test (:name :no-alien-sap-call
++                  :skipped-on (and (not :sb-thread) :x86-64))
+   (let ((lines
+          (ctu:disassembly-lines
+           (compile nil

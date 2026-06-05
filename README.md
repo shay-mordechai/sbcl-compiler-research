@@ -1,112 +1,97 @@
-# Security Advisory: Lexical Scope Bypass via Dynamic Binding Injection in SBCL
+# Architectural Security Analysis: SBCL Compiler Trust Boundary
+**Tracking:** CERT-IL Ref #11265 | MITRE CVE Request ID: 1977672
+**Principle:** Trust but Verify
+
+---
 
 ## 1. Executive Summary
 
-During targeted security research utilizing AI-augmented semantic fuzzing and telemetry analysis, a critical logical flaw was identified in the **SBCL (Steel Bank Common Lisp) Compiler (v2.3.2)**. The vulnerability resides in the compiler's handling of variable bindings, permitting an attacker to bypass lexical isolation (scoping) guarantees by forcibly injecting dynamic bindings during compile-time/macro expansion.
+This repository documents a security research investigation into the Steel Bank Common Lisp (SBCL) macro expansion phase, following the principle of responsible disclosure and differential verification.
 
-This research was handled via a strict responsible disclosure process. Following extensive coordination with the Israeli National Cyber Directorate (CERT-IL) and a direct submission to MITRE, this advisory is being published to inform the security and developer community.
+**Initial Hypothesis:** Three semantic mechanisms appeared to bypass lexical scope isolation during macro expansion—Dynamic Binding Modification, Symbol Table Pollution, and Namespace Confusion. Coupled with suspicious upstream commits, this initially resembled a classic Zero-Day vulnerability accompanied by a Silent Patch.
 
-* **Target:** SBCL Compiler (https://www.sbcl.org/)
-* **Vulnerability Type:** Logical Flaw / Scope Isolation Bypass
-* **Tracking:** CERT-IL #11265 | MITRE CVE-Req #1977672
-* **Researcher:** Shay Mordechai
+**Differential Testing Verdict:** Applying a strict "Trust but Verify" methodology, all three Proofs-of-Concept were tested against a legacy baseline (SBCL 1.4.3) and a modern release (SBCL 2.5.9+). The PoCs produced **identical behavior on both versions**. 
 
----
-
-## 2. Disclosure Timeline
-
-The vulnerability was handled under a standard Responsible Disclosure policy:
-
-* **August 4, 2025:** Initial vulnerability report submitted to the Israeli National Cyber Directorate (CERT-IL).
-* **December 17, 2025:** Full technical breakdown and Proof of Concept (PoC) shared with CERT-IL.
-* **January 13, 2026:** Direct submission to MITRE for CVE assignment (CVE-Req #1977672) due to vendor notification delays.
-* **April 5, 2026:** Official update from CERT-IL regarding limited processing capacity due to national emergency prioritization; disclosure remained pending vendor confirmation.
-* **May 2026 (Present):** Disclosure initiated in accordance with the industry-standard 90-day disclosure policy.
+**Conclusion:** The behaviors conform to the ANSI Common Lisp specification. Macros are implicitly trusted code permitted to execute `proclaim`, `intern`, and `shadow` at compile-time. As demonstrated by our differential analysis, the upstream patches addressed separate runtime stability and concurrency issues—not macro-level security sandboxing.
 
 ---
 
-## 3. The Architectural Hypothesis
+## 2. The Finding: When Lexical Scope Is Not a Security Boundary
 
-This project began with a theoretical question regarding compiler internals:
-> *If macros execute during compilation without a traditional runtime stack, what actually enforces variable isolation and scope separation?*
+The core discovery of this research is that Common Lisp provides **no security boundary** between project source code and macro code executing at compile-time. 
 
-Instead of approaching this only theoretically, I designed an automated research experiment around SBCL to test the boundaries of lexical versus dynamic scope interactions.
+From the perspective of a developer coming from languages with a more conservative compilation model (e.g., Java, C#, Rust), this behavior can create a false sense of security regarding isolation boundaries during the Build phase. While the behavior is by design, it demonstrates how compile-time code execution creates an attack surface overlooked in traditional security models.
 
----
+**Modern Threat Model: Compile-Time Supply Chain Poisoning**
+In CI/CD environments, a developer importing a third-party library implicitly trusts every macro it defines to run with full compiler access. A poisoned macro can:
+1. Influence the compilation environment to alter symbol behaviors.
+2. Exfiltrate local compilation data (e.g., hardcoded API keys) during the build phase.
+3. Leave absolutely no trace in the final compiled binary.
 
-## 4. Research Methodology
-
-This vulnerability was discovered using a custom **AI-Augmented Semantic Fuzzing Harness**. Unlike traditional mutational fuzzers that generate malformed bytes to cause memory corruption, this research focused on structured, syntactically valid inputs designed to stress the compiler's logical boundaries and Abstract Syntax Tree (AST) generation.
-
-A Python-based telemetry harness was used to generate thousands of scoped Lisp environments, systematically testing edge cases in closure capture, package confusion, and symbol interning. The successful vector—dynamic binding injection—yielded a consistent 6% reliable bypass rate during automated testing campaigns.
-
----
-
-## 5. Technical Analysis
-
-The root cause stems from insufficient state validation within the `proclaim` mechanism regarding active lexical environments (`lexenv`).
-
-When `(proclaim '(special ...))` is executed, the compiler globally updates the target symbol's internal flags. If this targeted symbol is already actively bound within a local lexical scope (e.g., via a `let` construct), SBCL fails to maintain the strict separation between the environments. 
-
-Binary and structural analysis indicates that the `SPECIAL` flag within the internal symbol structure is modified without validating whether it shadows an existing lexical binding. Because macros are expanded at compile-time (prior to runtime stack frame creation), the compiler blindly transitions the symbol's resolution path from the protected lexical environment to the global dynamic environment. This represents a fundamental design flaw in the interplay between global declarations and compile-time memory isolation.
+This vector is entirely invisible to standard runtime security tools (DAST/RASP), as the exploit concludes in the pipeline before deployment. Furthermore, official SBCL documentation contains no explicit reference treating macros as a Trusted Code Boundary. 
 
 ---
 
-## 6. Proof of Concept (PoC)
+## 3. Mechanisms & Proof of Concept (PoC)
 
-The following Lisp code demonstrates how a protected lexical variable (`secret-data`) is compromised from the outside, overriding its supposedly private memory space.
+The `trust_but_verify_poc` directory contains the evaluation artifacts demonstrating the three mechanisms:
+
+1. **Dynamic Binding Modification:** Using `(proclaim '(special ,target))` inside a macro to alter the symbol's metadata globally, changing how the compiler resolves the symbol.
+2. **Global Symbol Table Pollution:** Using `intern` to acquire a global pointer to a local variable's symbol object and mutating its Property List (`plist`).
+3. **Cross-Package Namespace Confusion:** Using `make-package` and `shadow` to alter the Package Namespace in a way that contradicts intuitive scope assumptions during compile-time symbol resolution.
+
+---
+
+## 4. Technical Analysis of Upstream Commits
+
+While differential testing proved that upstream modifications did not alter macro-level scope behaviors, our forensic audit of the Git differentials (`evidence_artifacts`) explains what these hotfixes actually resolved:
+
+### A. Thread-Safety & Mutation Restrictions (`src/compiler/x86-64/cell.lisp`)
+Upstream commits aggressively locked down the virtual operations (`VOPs`) for global cell mutations (`dynbind`, `unbind`, and `%cas-symbol-global-value`). The hotfix wraps these global state modifications inside a `pseudo-atomic` block and forces an `emit-symbol-write-barrier`:
 
 ```lisp
-;; Vulnerable Macro: Forces a symbol to become dynamic (special)
-(defmacro isolation-bypass-attack (target new-value)
-  `(progn
-     (proclaim '(special ,target))  ; Injecting dynamic binding
-     (setf ,target ,new-value)))    ; Overriding the lexical value
-
-(defun verify-vulnerability ()
-  (let ((secret-data "PROTECTED_DATA"))
-    (format t "Before Attack: ~A~%" secret-data)
-    
-    ;; Triggering the bypass against the lexical scope
-    (isolation-bypass-attack secret-data "COMPROMISED")
-    
-    (format t "After Attack: ~A~%" secret-data)
-    (if (string= secret-data "COMPROMISED")
-        (format t "[!] VULNERABILITY CONFIRMED: Lexical isolation bypassed.~%")
-        (format t "[+] Isolation preserved.~%"))))
-
-;; Execute
-(verify-vulnerability)
+(pseudo-atomic (:elide-if #+immobile-space
+                          (not (symbol-set-barrier-p symbol value-ref))
+                          #-immobile-space t)
+  (emit-symbol-write-barrier vop symbol temp value-ref)
+  (storew val symbol symbol-value-slot other-pointer-lowtag))
 
 ```
 
-**Expected vs. Actual Output:**
-In a strictly isolated lexical environment, `secret-data` should remain `"PROTECTED_DATA"`. However, executing this PoC yields `"COMPROMISED"`, confirming the bypass of the lexical boundary.
+**Analysis:** This mechanism prevents asynchronous thread interrupts or concurrent garbage collection passes from corrupting global symbol metadata during execution. It ensures internal synchronization (correctness) rather than macro isolation.
+
+### B. Thread-Local Storage Indirection (`src/compiler/x86-64/tls.lisp`)
+
+The introduction of the `#+tls-load-indirect` architecture overhauled how dynamic variables resolve through fixed TLS offsets. Instead of direct mapping, the runtime now routes bindings through a map and catches invalid dereferences via a trap handler (`handle_tls_deref_trap` in `x86-64-arch.c`):
+
+```assembly
+(inst shr :dword scratch-reg 1)
+(inst mov (ea -4 rbx-tn scratch-reg) symbol)
+
+```
+
+**Analysis:** This indirection stabilizes parallel runtime lookups across environments, removing thread-local memory collisions during severe state changes.
 
 ---
 
-## 7. Impact Assessment (Supply Chain Risk)
+## 5. Disclosure Timeline
 
-While this is a compiler-level logic flaw rather than a runtime memory corruption, it poses a distinct risk in the context of modern **CI/CD and Supply Chain Attacks**.
-
-* **Integrity (High):** Variables utilized in security-sensitive control flows (e.g., compile-time sandbox state flags, authentication markers, internal pointers) can be manipulated externally.
-* **Confidentiality (Medium):** Private lexical data can be forced into the dynamic scope, exposing memory contents to unintended functions across the call stack.
-
-**Attack Scenario:** An attacker publishes a seemingly benign third-party Lisp package containing a poisoned macro. When a developer imports this package and compiles their application, the macro executes during the build phase. Relying on this isolation bypass, the malicious macro can silently overwrite or extract locally scoped constants (like cryptographic seeds or hardcoded API keys) in the developer's code. The application compiles successfully, but its internal logic is compromised before deployment.
-
----
-
-## 8. Recommended Mitigation
-
-To remediate this behavior, the compiler's `proclaim` and `declaim` mechanisms require strict **State Validation** checks against the active `lexenv` during AST generation.
-
-Changing the binding type of a symbol must be blocked or safely deferred if the symbol is already active within a local lexical scope. The compiler should throw a strict warning or compilation error (e.g., *"Cannot proclaim special: active lexical binding exists"*) to enforce the isolation boundary, ensuring existing lexical bindings remain entirely unaffected by runtime modifications to global flags.
+| Date | Event |
+| --- | --- |
+| Aug 4, 2025 | Initial report submitted to CERT-IL (#11265) |
+| Dec 17, 2025 | Full technical report + PoCs submitted |
+| Jan 13, 2026 | CVE Request initiated via MITRE (ID: 1977672) |
+| Feb 9, 2026 | CERT-IL confirms coordination |
+| Feb 25 – Mar 13, 2026 | Upstream commits: TLS indirection architecture |
+| Apr 2, 2026 | Direct email to sbcl-bugs mailing list warning of compile-time scope anomalies |
+| Apr 8–10, 2026 | Upstream commits: `dynbind` pseudo-atomic and CAS constraints |
+| May 25, 2026 | Public disclosure after 90-day period |
 
 ---
 
-## 9. Repository Structure
+## 6. Repository Structure
 
-* `fuzzer/` — Custom Python fuzzing harness and semantic payload generators.
-* `test_cases/` — Structured inputs testing scoping rules, closures, and package boundaries.
-* `src/` — Analysis scripts and helper functions.
-* `docs/` — Technical research guides and disclosure notes.
+* `evidence_artifacts/`: Upstream patches analyzed during the code-correctness review.
+* `trust_but_verify_poc/`: Verification scripts and evaluation logs.
+* `vulnerable_baseline/`: Execution traces on legacy SBCL v1.4.3.
+* `patched_version/`: Execution traces on modern SBCL releases.

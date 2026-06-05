@@ -6,8 +6,8 @@ This module implements a fuzzer for testing the SBCL-LISP macro engine.
 The fuzzer generates various test cases with different input patterns
 to identify potential vulnerabilities and unexpected behaviors.
 
-Author: [Your Name]
-Date: [Current Date]
+Author: Shay Mordechai
+Date: May 2026
 """
 
 import os
@@ -68,8 +68,6 @@ class SBCLMacroFuzzer:
         Returns:
             Generated LISP code as string
         """
-        # TODO: Implement specific macro test case generation
-        # This is a placeholder - you'll need to implement based on chosen macro
         
         test_patterns = [
             # Basic patterns

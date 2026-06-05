@@ -5,8 +5,8 @@ SBCL-LISP Fuzzing Test Harness
 This module provides a test harness for systematically testing SBCL-LISP
 with various inputs and collecting detailed crash information.
 
-Author: [Your Name]
-Date: [Current Date]
+Author: Shay Mordechai
+Date: May 2026
 """
 
 import os
