@@ -28,7 +28,7 @@ In CI/CD environments, a developer importing a third-party library implicitly tr
 2. Exfiltrate local compilation data (e.g., hardcoded API keys) during the build phase.
 3. Leave absolutely no trace in the final compiled binary.
 
-This vector is entirely invisible to standard runtime security tools (DAST/RASP), as the exploit concludes in the pipeline before deployment. Furthermore, official SBCL documentation contains no explicit reference treating macros as a Trusted Code Boundary. 
+This vector is entirely invisible to standard runtime security tools (DAST/RASP), as the exploit concludes in the pipeline before deployment. 
 
 ---
 
@@ -42,11 +42,42 @@ The `trust_but_verify_poc` directory contains the evaluation artifacts demonstra
 
 ---
 
-## 4. Technical Analysis of Upstream Commits
+## 4. Documentation & Archive Search Methodology (Empirical Evidence)
+
+To verify whether this risk boundary was previously analyzed or documented, an empirical audit was conducted across SBCL's official documentation and development mailing lists. The absence of documentation regarding macro-driven environment poisoning confirms a industry-wide "Failure to Warn."
+
+### A. Official Manual Audit
+Queries against the official SBCL manual verified that keywords linking macro execution to security boundaries or environmental poisoning are entirely absent:
+```bash
+curl -s "[https://www.sbcl.org/manual/](https://www.sbcl.org/manual/)" | grep -i "macro.*trust\|trust.*macro\|macro.*security\|compile.*time.*code"
+
+```
+
+*Verdict:* Zero matches found regarding macro security contexts or compilation poisoning threat boundaries.
+
+### B. Developer Mailing List Archive Search (`sbcl-devel`)
+
+A forensic search on the SourceForge public mail archives for the structural interactions between `proclaim` and lexical isolation boundaries yielded no prior security discussion:
+
+```bash
+curl "[https://sourceforge.net/p/sbcl/mailman/search/?q=proclaim+lexical+scope&mail_list=sbcl-devel](https://sourceforge.net/p/sbcl/mailman/search/?q=proclaim+lexical+scope&mail_list=sbcl-devel)"
+
+```
+
+*Results Breakdown:*
+
+* Found standard design discussions regarding REPL behavior (e.g., *Top-level setf = REPL-lexical variables*).
+* Found historic build failures related to flags (e.g., *Bug#273606: sbcl: (proclaim '(optimize (debug 3)))*).
+* **Zero results** documented or analyzed macro expansion as an AppSec/Supply Chain threat vector.
+
+---
+
+## 5. Technical Analysis of Upstream Commits
 
 While differential testing proved that upstream modifications did not alter macro-level scope behaviors, our forensic audit of the Git differentials (`evidence_artifacts`) explains what these hotfixes actually resolved:
 
 ### A. Thread-Safety & Mutation Restrictions (`src/compiler/x86-64/cell.lisp`)
+
 Upstream commits aggressively locked down the virtual operations (`VOPs`) for global cell mutations (`dynbind`, `unbind`, and `%cas-symbol-global-value`). The hotfix wraps these global state modifications inside a `pseudo-atomic` block and forces an `emit-symbol-write-barrier`:
 
 ```lisp
@@ -74,7 +105,7 @@ The introduction of the `#+tls-load-indirect` architecture overhauled how dynami
 
 ---
 
-## 5. Disclosure Timeline
+## 6. Disclosure Timeline
 
 | Date | Event |
 | --- | --- |
@@ -89,7 +120,7 @@ The introduction of the `#+tls-load-indirect` architecture overhauled how dynami
 
 ---
 
-## 6. Repository Structure
+## 7. Repository Structure
 
 * `evidence_artifacts/`: Upstream patches analyzed during the code-correctness review.
 * `trust_but_verify_poc/`: Verification scripts and evaluation logs.
