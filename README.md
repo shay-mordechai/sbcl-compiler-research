@@ -34,7 +34,7 @@ This vector is entirely invisible to standard runtime security tools (DAST/RASP)
 
 ## 3. Mechanisms & Proof of Concept (PoC)
 
-The `trust_but_verify_poc` directory contains the evaluation artifacts demonstrating the three mechanisms:
+The `differential_verification` directory contains the evaluation artifacts demonstrating the three mechanisms:
 
 1. **Dynamic Binding Modification:** Using `(proclaim '(special ,target))` inside a macro to alter the symbol's metadata globally, changing how the compiler resolves the symbol.
 2. **Global Symbol Table Pollution:** Using `intern` to acquire a global pointer to a local variable's symbol object and mutating its Property List (`plist`).
@@ -123,6 +123,6 @@ The introduction of the `#+tls-load-indirect` architecture overhauled how dynami
 ## 7. Repository Structure
 
 * `evidence_artifacts/`: Upstream patches analyzed during the code-correctness review.
-* `trust_but_verify_poc/`: Verification scripts and evaluation logs.
+* `differential_verification/`: Verification scripts and evaluation logs.
 * `vulnerable_baseline/`: Execution traces on legacy SBCL v1.4.3.
 * `patched_version/`: Execution traces on modern SBCL releases.
